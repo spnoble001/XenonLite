@@ -20,46 +20,6 @@ import xenon.dev.utils.MagicUtils;
 import xenon.dev.utils.PerlinNoise;
 import xenon.dev.utils.XObject;
 
-// USA RUIDO PERLIN PARA CALCULOS
-// Integré ruido Perlin continuo en el cálculo de yaw y pitch de AimAssist.java.
-//
-//Añadí PerlinNoise.java, con:
-//
-//•
-//
-//Semilla pseudoaleatoria por instancia.
-//
-//•
-//
-//Interpolación Perlin suave.
-//
-//•
-//
-//Muestras temporalmente correlacionadas.
-//
-//•
-//
-//Canales independientes para yaw y pitch.
-//
-//•
-//
-//Perturbación acotada mediante la diferencia entre muestras consecutivas.
-//
-//•
-//
-//Reinicialización al cambiar o perder el objetivo para evitar saltos.
-//
-//La UI muestra dos ajustes nuevos:
-//
-//•
-//
-//Noise: intensidad, de 0.0 a 2.0; valor inicial 0.35.
-//
-//•
-//
-//Noise Speed: velocidad de evolución, de 0.01 a 0.30; valor inicial 0.08.
-//
-//El pitch usa el 65 % de la intensidad del yaw para que su movimiento sea más moderado. Ambos actualizan también sus rotaciones previas para mantener suave la interpolación visual.
 @Mod(keybind = 0)
 public final class AimAssist extends Module {
     private UUID lastEntity;
