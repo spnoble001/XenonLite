@@ -1,0 +1,16 @@
+[
+  {
+    "modid": "xenonlite",
+    "name": "Xenon Lite",
+    "description": "Base para un mod de cliente de Minecraft Forge 1.8.9.",
+    "version": "${version}",
+    "mcversion": "${mcversion}",
+    "authorList": [],
+    "credits": "",
+    "url": "",
+    "updateUrl": "",
+    "logoFile": "",
+    "screenshots": [],
+    "dependencies": []
+  }
+]
