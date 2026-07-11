@@ -40,13 +40,19 @@ XenonLite.instance.getRightClicker().setEnabled(true);
 XenonLite.instance.getRefill().setEnabled(true);
 XenonLite.instance.getThrowPot().toggle();
 XenonLite.instance.getAimAssist().setEnabled(true);
+XenonLite.instance.getReach().setEnabled(true);
+XenonLite.instance.getVelocity().setEnabled(true);
 ```
 
 Si no se usa una instancia estática de `XenonLite`, conserva la instancia que Forge
 inyecta o conecta el método `setEnabled` directamente desde tu gestor de módulos.
 
-La interfaz se abre con `Right Shift`. Permite activar módulos, modificar sus
-ajustes y redimensionar el panel desde la esquina inferior derecha. El keybind de
+La interfaz se abre con `Right Shift`. Su tamaño inicial se adapta a la resolución
+y al `GUI Scale` de Minecraft, y nunca usa un mínimo fijo mayor que el área útil.
+Permite activar módulos, modificar sus ajustes y redimensionar el panel desde la
+esquina inferior derecha. La rueda del ratón desplaza de forma independiente la
+lista de módulos o la lista de ajustes según la columna bajo el cursor; ambas áreas
+usan recorte para impedir que el contenido salga del panel. El keybind de
 `ThrowPot` se puede capturar desde la propia interfaz; `Delete` o `Backspace` lo
 elimina y `Escape` cancela la captura.
 
@@ -183,3 +189,29 @@ una temporización local no bloqueante y deja que Minecraft gestione el envío.
 
 La restauración de `A` se ejecuta también desde `finally` si hay una interrupción o
 falla una tarea. La bandera `throwing` impide iniciar dos secuencias simultáneas.
+
+## Módulo Velocity
+
+`Velocity` modifica el movimiento recibido en el primer tick de daño, cuando
+`hurtResistantTime == maxHurtResistantTime`. Solo procesa el evento correspondiente
+al jugador local y como máximo una vez por `ticksExisted`.
+
+- `Vert`: multiplicador de `motionY`, entre `0.0` y `2.0`.
+- `Hor`: multiplicador de `motionX` y `motionZ`, entre `0.0` y `2.0`.
+- `Chance`: probabilidad configurada entre `2` y `100`.
+
+La comprobación conserva la comparación inclusiva del código original:
+`random.nextInt(100) <= Chance`.
+
+## Módulo Reach
+
+`Reach` recalcula el raycast del cursor cuando Forge emite un evento de ratón.
+El rango se escoge aleatoriamente entre `Min` y `Max`, condicionado por `Chance`.
+
+- `Min` y `Max`: alcance entre `3.0` y `6.0` bloques.
+- `Chance`: comparación inclusiva contra un entero de `0` a `100`.
+- `Walls`: permite continuar cuando el raycast actual encuentra un bloque sólido.
+- `Sprint`: exige que el jugador esté corriendo.
+
+El raycast conserva la prioridad del bloque más cercano y solo sustituye
+`objectMouseOver` cuando una entidad válida está más cerca que dicho impacto.

@@ -9,6 +9,8 @@ import xenon.dev.modules.mods.combat.RightClicker;
 import xenon.dev.modules.mods.combat.Refill;
 import xenon.dev.modules.mods.combat.ThrowPot;
 import xenon.dev.modules.mods.combat.AimAssist;
+import xenon.dev.modules.mods.combat.Reach;
+import xenon.dev.modules.mods.player.Velocity;
 
 @Mod(
         modid = XenonLite.MOD_ID,
@@ -30,6 +32,8 @@ public final class XenonLite {
     private Refill refill;
     private ThrowPot throwPot;
     private AimAssist aimAssist;
+    private Reach reach;
+    private Velocity velocity;
 
     @Mod.EventHandler
     public void init(FMLInitializationEvent event) {
@@ -43,6 +47,10 @@ public final class XenonLite {
         this.throwPot = new ThrowPot();
         this.aimAssist = new AimAssist();
         MinecraftForge.EVENT_BUS.register(this.aimAssist);
+        this.reach = new Reach();
+        MinecraftForge.EVENT_BUS.register(this.reach);
+        this.velocity = new Velocity();
+        MinecraftForge.EVENT_BUS.register(this.velocity);
     }
 
     public LeftClicker getLeftClicker() {
@@ -63,5 +71,13 @@ public final class XenonLite {
 
     public AimAssist getAimAssist() {
         return this.aimAssist;
+    }
+
+    public Reach getReach() {
+        return this.reach;
+    }
+
+    public Velocity getVelocity() {
+        return this.velocity;
     }
 }
