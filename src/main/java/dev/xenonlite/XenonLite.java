@@ -9,7 +9,12 @@ import xenon.dev.modules.mods.combat.RightClicker;
 import xenon.dev.modules.mods.combat.Refill;
 import xenon.dev.modules.mods.combat.ThrowPot;
 import xenon.dev.modules.mods.combat.AimAssist;
+import xenon.dev.modules.mods.combat.Equipo;
 import xenon.dev.modules.mods.combat.Reach;
+import xenon.dev.modules.mods.combat.PatchClicker;
+import xenon.dev.modules.mods.combat.PatchClickerV2;
+import xenon.dev.modules.mods.combat.LeftClickerV2;
+import xenon.dev.modules.mods.combat.PatchCrumbs;
 import xenon.dev.modules.mods.player.Velocity;
 
 @Mod(
@@ -32,7 +37,12 @@ public final class XenonLite {
     private Refill refill;
     private ThrowPot throwPot;
     private AimAssist aimAssist;
+    private Equipo equipo;
     private Reach reach;
+    private PatchClicker patchClicker;
+    private PatchClickerV2 patchClickerV2;
+    private LeftClickerV2 leftClickerV2;
+    private PatchCrumbs patchCrumbs;
     private Velocity velocity;
 
     @Mod.EventHandler
@@ -45,10 +55,20 @@ public final class XenonLite {
         this.refill = new Refill();
         MinecraftForge.EVENT_BUS.register(this.refill);
         this.throwPot = new ThrowPot();
-        this.aimAssist = new AimAssist();
+        this.equipo = new Equipo();
+        MinecraftForge.EVENT_BUS.register(this.equipo);
+        this.aimAssist = new AimAssist(this.equipo);
         MinecraftForge.EVENT_BUS.register(this.aimAssist);
         this.reach = new Reach();
         MinecraftForge.EVENT_BUS.register(this.reach);
+        this.patchClicker = new PatchClicker();
+        MinecraftForge.EVENT_BUS.register(this.patchClicker);
+        this.patchClickerV2 = new PatchClickerV2();
+        MinecraftForge.EVENT_BUS.register(this.patchClickerV2);
+        this.leftClickerV2 = new LeftClickerV2();
+        MinecraftForge.EVENT_BUS.register(this.leftClickerV2);
+        this.patchCrumbs = new PatchCrumbs();
+        MinecraftForge.EVENT_BUS.register(this.patchCrumbs);
         this.velocity = new Velocity();
         MinecraftForge.EVENT_BUS.register(this.velocity);
     }
@@ -73,8 +93,28 @@ public final class XenonLite {
         return this.aimAssist;
     }
 
+    public Equipo getEquipo() {
+        return this.equipo;
+    }
+
     public Reach getReach() {
         return this.reach;
+    }
+
+    public PatchClicker getPatchClicker() {
+        return this.patchClicker;
+    }
+
+    public PatchClickerV2 getPatchClickerV2() {
+        return this.patchClickerV2;
+    }
+
+    public LeftClickerV2 getLeftClickerV2() {
+        return this.leftClickerV2;
+    }
+
+    public PatchCrumbs getPatchCrumbs() {
+        return this.patchCrumbs;
     }
 
     public Velocity getVelocity() {

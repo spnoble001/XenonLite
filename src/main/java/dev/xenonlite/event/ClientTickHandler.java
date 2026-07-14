@@ -13,6 +13,7 @@ import xenon.dev.ui.ClickGuiObj;
 public final class ClientTickHandler {
     private boolean guiKeyDown;
     private boolean throwPotKeyDown;
+    private boolean patchClickerV2KeyDown;
 
     @SubscribeEvent
     public void onClientTick(TickEvent.ClientTickEvent event) {
@@ -44,6 +45,16 @@ public final class ClientTickHandler {
                 XenonLite.instance.getThrowPot().toggle();
             }
             this.throwPotKeyDown = throwPressed;
+        }
+
+        if (XenonLite.instance != null && XenonLite.instance.getPatchClickerV2() != null) {
+            int patchKey = XenonLite.instance.getPatchClickerV2().getKeybinding();
+            boolean patchPressed = patchKey != Keyboard.KEY_NONE && Keyboard.isKeyDown(patchKey);
+            if (patchPressed && !this.patchClickerV2KeyDown
+                    && Minecraft.getMinecraft().currentScreen == null) {
+                XenonLite.instance.getPatchClickerV2().toggle();
+            }
+            this.patchClickerV2KeyDown = patchPressed;
         }
 
         // Punto de entrada para la lógica que debe ejecutarse cada tick.

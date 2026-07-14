@@ -10,7 +10,6 @@ import net.minecraft.item.ItemSword;
 import net.minecraftforge.fml.common.eventhandler.SubscribeEvent;
 import net.minecraftforge.fml.common.gameevent.TickEvent;
 import org.lwjgl.input.Mouse;
-import xenon.dev.Xenon;
 import xenon.dev.events.XenonEvent;
 import xenon.dev.modules.Mod;
 import xenon.dev.modules.Module;
@@ -22,6 +21,7 @@ import xenon.dev.utils.XObject;
 
 @Mod(keybind = 0)
 public final class AimAssist extends Module {
+    private final Equipo equipo;
     private UUID lastEntity;
     private final PerlinNoise yawNoise = new PerlinNoise(UUID.randomUUID().getMostSignificantBits());
     private final PerlinNoise pitchNoise = new PerlinNoise(UUID.randomUUID().getLeastSignificantBits());
@@ -29,7 +29,8 @@ public final class AimAssist extends Module {
     private double previousPitchNoise;
     private boolean noiseInitialized;
 
-    public AimAssist() {
+    public AimAssist(Equipo equipo) {
+        this.equipo = equipo;
         this.sl.add(new Settings("FOV".toCharArray(), this, MagicUtils.xor(70), MagicUtils.xor(10), 180.0F, true));
         this.sl.add(new Settings("Speed".toCharArray(), this, 1.0F, MagicUtils.xor(0) + 1.0F, MagicUtils.xor(20), false));
         this.sl.add(new Settings("Min".toCharArray(), this, 1.8F, 0.1F, 3.0F, false));
@@ -156,7 +157,8 @@ public final class AimAssist extends Module {
         float closestDistance = Float.MAX_VALUE;
         for (EntityPlayer entity : this.minecraft.theWorld.playerEntities) {
             float distance = this.minecraft.thePlayer.getDistanceToEntity(entity);
-            if (Xenon.getInstance().friendsList.contains(entity.getUniqueID())
+            if ((this.equipo != null && this.equipo.isEnabled()
+                    && this.equipo.contiene(entity.getUniqueID()))
                     || AimUtils.getDifference(entity) > fov
                     || !this.minecraft.thePlayer.canEntityBeSeen(entity)
                     || distance < minimumDistance

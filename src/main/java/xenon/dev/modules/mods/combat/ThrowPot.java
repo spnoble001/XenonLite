@@ -1,11 +1,17 @@
 package xenon.dev.modules.mods.combat;
 
+import java.lang.reflect.Field;
 import java.util.UUID;
-import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.ThreadLocalRandom;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.TimeUnit;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.settings.KeyBinding;
 import net.minecraft.item.ItemStack;
+import net.minecraft.network.play.client.C03PacketPlayer;
+import net.minecraftforge.fml.relauncher.ReflectionHelper;
 import org.lwjgl.input.Keyboard;
 import xenon.dev.modules.Mod;
 import xenon.dev.modules.Module;
@@ -14,103 +20,203 @@ import xenon.dev.utils.ClickerUtils;
 import xenon.dev.utils.MagicUtils;
 import xenon.dev.utils.PerlinNoise;
 import xenon.dev.utils.PotionUtils;
+import xenon.dev.utils.RightClickCoordinator;
 import xenon.dev.utils.XObject;
 
 @Mod(keybind = 0)
-public final class ThrowPot extends Module {
+public final class ThrowPot extends Module implements RightClickCoordinator.Owner {
+    private static final int INPUT_PRIORITY = 100;
+    private static final Field RIGHT_CLICK_DELAY_TIMER = ReflectionHelper.findField(
+            Minecraft.class, "rightClickDelayTimer", "field_71467_ac");
+    private static final ScheduledExecutorService TIMER = Executors.newSingleThreadScheduledExecutor(
+            new ThreadFactory() {
+                @Override
+                public Thread newThread(Runnable runnable) {
+                    Thread thread = new Thread(runnable, "XenonLite-ThrowPot-Timer");
+                    thread.setDaemon(true);
+                    return thread;
+                }
+            });
+
     private volatile boolean throwing;
     private final PerlinNoise transitionNoise = new PerlinNoise(UUID.randomUUID().getMostSignificantBits());
     private long sequence;
+    private final PerlinNoise autoPotNoise = new PerlinNoise(UUID.randomUUID().getLeastSignificantBits());
 
     public ThrowPot() {
         this.name = "Throw Pot";
         setKeybinding(Keyboard.KEY_F);
         this.sl.add(new Settings(
-                "Speed".toCharArray(),
-                this,
-                MagicUtils.xor(250),
-                MagicUtils.xor(200),
-                MagicUtils.xor(300),
-                true
-        ));
+                "Speed".toCharArray(), this, MagicUtils.xor(250), MagicUtils.xor(200),
+                MagicUtils.xor(300), true));
         this.sl.add(new Settings("Detour".toCharArray(), this, true));
         registerSettings();
     }
 
-    private void throwItem(final int slot, final int initialSlot) {
+    private void throwItem(final int potionSlot, final int initialSlot) {
+        if (!RightClickCoordinator.acquire(this, INPUT_PRIORITY)) {
+            return;
+        }
         this.throwing = true;
-        Thread thread = new Thread(new Runnable() {
+        final long totalDelay = sampleLogNormalDelay(setting(0).getValfloat());
+        int candidate = chooseDetourSlot(initialSlot, potionSlot);
+        boolean useDetour = setting(1).getValBoolean() && candidate != -1 && shouldUseDetour();
+        if (useDetour) {
+            final int detourSlot = candidate;
+            final long firstDelay = detourDelay(totalDelay);
+            enqueueMainThread(new Runnable() {
+                @Override
+                public void run() {
+                    selectSlotNow(detourSlot);
+                    schedule(firstDelay, new Runnable() {
+                        @Override
+                        public void run() {
+                            enqueuePotionThrow(potionSlot, initialSlot, totalDelay - firstDelay);
+                        }
+                    });
+                }
+            });
+        } else {
+            enqueuePotionThrow(potionSlot, initialSlot, totalDelay);
+        }
+    }
+
+    private void enqueuePotionThrow(final int potionSlot, final int initialSlot, final long restoreDelay) {
+        enqueueMainThread(new Runnable() {
             @Override
             public void run() {
-                boolean restored = false;
+                if (!canContinueThrow()) {
+                    finishThrow(initialSlot);
+                    return;
+                }
+                selectSlotNow(potionSlot);
+                throwPotionNow();
+                schedule(restoreDelay, new Runnable() {
+                    @Override
+                    public void run() {
+                        enqueueMainThread(new Runnable() {
+                            @Override
+                            public void run() {
+                                finishThrow(initialSlot);
+                            }
+                        });
+                    }
+                });
+            }
+        });
+    }
+
+    private void throwPotionNow() {
+        setRightClickDelayTimer(0);
+        int useKey = this.minecraft.gameSettings.keyBindUseItem.getKeyCode();
+        KeyBinding.setKeyBindState(useKey, true);
+        KeyBinding.onTick(useKey);
+        new ClickerUtils().sendFakeRight();
+        KeyBinding.setKeyBindState(useKey, false);
+    }
+
+    public boolean triggerPrioritaryThrow() {
+        if (this.throwing || this.minecraft.thePlayer == null || this.minecraft.theWorld == null) {
+            return false;
+        }
+        int potionSlot = findPotionSlot();
+        if (potionSlot < 0 || !RightClickCoordinator.acquire(this, INPUT_PRIORITY)) {
+            return false;
+        }
+
+        this.throwing = true;
+        int initialSlot = this.minecraft.thePlayer.inventory.currentItem;
+        float originalPitch = this.minecraft.thePlayer.rotationPitch;
+        float originalYaw = this.minecraft.thePlayer.rotationYaw;
+        try {
+            selectSlotNow(potionSlot);
+            float silentPitch = 85.0F;
+            float silentYaw = originalYaw
+                    + (float) (this.autoPotNoise.sample(System.nanoTime() / 1.0E9D) * 1.5D);
+            this.minecraft.thePlayer.rotationPitch = silentPitch;
+            this.minecraft.thePlayer.rotationYaw = silentYaw;
+            this.minecraft.thePlayer.sendQueue.addToSendQueue(
+                    new C03PacketPlayer.C05PacketPlayerLook(
+                            silentYaw, silentPitch, this.minecraft.thePlayer.onGround));
+            setRightClickDelayTimer(0);
+            new ClickerUtils().sendFakeRight();
+            this.minecraft.playerController.sendUseItem(
+                    this.minecraft.thePlayer, this.minecraft.theWorld,
+                    this.minecraft.thePlayer.getHeldItem());
+            return true;
+        } finally {
+            this.minecraft.thePlayer.rotationPitch = originalPitch;
+            this.minecraft.thePlayer.rotationYaw = originalYaw;
+            selectSlotNow(initialSlot);
+            this.throwing = false;
+            RightClickCoordinator.release(this);
+        }
+    }
+
+    public boolean hasPotion() {
+        return findPotionSlot() >= 0;
+    }
+
+    private int findPotionSlot() {
+        if (this.minecraft.thePlayer == null) {
+            return -1;
+        }
+        for (int slot = 0; slot < 9; slot++) {
+            ItemStack stack = this.minecraft.thePlayer.inventory.mainInventory[slot];
+            if (stack != null && PotionUtils.isSplashPotion(new XObject<ItemStack>(stack))) {
+                return slot;
+            }
+        }
+        return -1;
+    }
+
+    private void finishThrow(int initialSlot) {
+        if (this.minecraft.thePlayer != null) {
+            selectSlotNow(initialSlot);
+        }
+        this.throwing = false;
+        RightClickCoordinator.release(this);
+    }
+
+    private boolean canContinueThrow() {
+        return this.throwing
+                && RightClickCoordinator.isOwner(this)
+                && this.minecraft.thePlayer != null
+                && this.minecraft.theWorld != null;
+    }
+
+    private void selectSlotNow(int slot) {
+        if (this.minecraft.thePlayer != null) {
+            this.minecraft.thePlayer.inventory.currentItem = slot;
+            this.minecraft.playerController.updateController();
+        }
+    }
+
+    private void enqueueMainThread(final Runnable action) {
+        this.minecraft.addScheduledTask(new Runnable() {
+            @Override
+            public void run() {
                 try {
-                    long totalDelay = sampleLogNormalDelay(setting(0).getValfloat());
-                    int detourSlot = chooseDetourSlot(initialSlot, slot);
-                    if (setting(1).getValBoolean() && detourSlot != -1 && shouldUseDetour()) {
-                        long detourDelay = detourDelay(totalDelay);
-                        selectSlot(detourSlot);
-                        Thread.sleep(detourDelay);
-                        selectSlot(slot);
-                        pressUseItem();
-                        Thread.sleep(totalDelay - detourDelay);
-                    } else {
-                        selectSlot(slot);
-                        pressUseItem();
-                        Thread.sleep(totalDelay);
-                    }
-                    selectSlot(initialSlot);
-                    restored = true;
-                } catch (InterruptedException exception) {
-                    Thread.currentThread().interrupt();
-                } catch (ExecutionException exception) {
+                    action.run();
+                } catch (RuntimeException exception) {
                     exception.printStackTrace();
-                } finally {
-                    if (!restored) {
-                        scheduleSlotRestore(initialSlot);
-                    }
                     throwing = false;
-                }
-            }
-        }, "XenonLite-ThrowPot");
-        thread.setDaemon(true);
-        thread.start();
-    }
-
-    private void selectSlot(final int slot) throws InterruptedException, ExecutionException {
-        this.minecraft.addScheduledTask(new Runnable() {
-            @Override
-            public void run() {
-                if (minecraft.thePlayer != null) {
-                    minecraft.thePlayer.inventory.currentItem = slot;
-                    minecraft.playerController.updateController();
-                }
-            }
-        }).get();
-    }
-
-    private void pressUseItem() throws InterruptedException, ExecutionException {
-        this.minecraft.addScheduledTask(new Runnable() {
-            @Override
-            public void run() {
-                int useKey = minecraft.gameSettings.keyBindUseItem.getKeyCode();
-                KeyBinding.setKeyBindState(useKey, true);
-                KeyBinding.onTick(useKey);
-                new ClickerUtils().sendFakeRight();
-                KeyBinding.setKeyBindState(useKey, false);
-            }
-        }).get();
-    }
-
-    private void scheduleSlotRestore(final int slot) {
-        this.minecraft.addScheduledTask(new Runnable() {
-            @Override
-            public void run() {
-                if (minecraft.thePlayer != null) {
-                    minecraft.thePlayer.inventory.currentItem = slot;
-                    minecraft.playerController.updateController();
+                    RightClickCoordinator.release(ThrowPot.this);
                 }
             }
         });
+    }
+
+    private static void schedule(long delay, Runnable action) {
+        TIMER.schedule(action, Math.max(0L, delay), TimeUnit.MILLISECONDS);
+    }
+
+    private void setRightClickDelayTimer(int value) {
+        try {
+            RIGHT_CLICK_DELAY_TIMER.setInt(this.minecraft, value);
+        } catch (IllegalAccessException exception) {
+            throw new IllegalStateException("Could not reset Minecraft right click delay", exception);
+        }
     }
 
     private long sampleLogNormalDelay(float requestedCenter) {
@@ -156,17 +262,19 @@ public final class ThrowPot extends Module {
         if (this.minecraft.theWorld == null || this.minecraft.thePlayer == null || this.throwing) {
             return;
         }
-
         int initialSlot = this.minecraft.thePlayer.inventory.currentItem;
-        AtomicInteger currentSlot = new AtomicInteger(0);
-        while (currentSlot.get() < 9) {
-            ItemStack stack = this.minecraft.thePlayer.inventory.mainInventory[currentSlot.get()];
+        for (int slot = 0; slot < 9; slot++) {
+            ItemStack stack = this.minecraft.thePlayer.inventory.mainInventory[slot];
             if (stack != null && PotionUtils.isSplashPotion(new XObject<ItemStack>(stack))) {
-                throwItem(currentSlot.get(), initialSlot);
-                break;
+                throwItem(slot, initialSlot);
+                return;
             }
-            currentSlot.incrementAndGet();
         }
+    }
+
+    @Override
+    public void onRightClickControlLost() {
+        this.throwing = false;
     }
 
     private Settings setting(int index) {

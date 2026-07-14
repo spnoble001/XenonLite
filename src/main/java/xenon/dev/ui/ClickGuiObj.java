@@ -2,9 +2,13 @@ package xenon.dev.ui;
 
 import dev.xenonlite.XenonLite;
 import java.awt.Color;
+import java.io.BufferedInputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 import net.minecraft.client.gui.GuiScreen;
 import net.minecraft.client.gui.ScaledResolution;
 import org.lwjgl.input.Keyboard;
@@ -12,10 +16,17 @@ import org.lwjgl.input.Mouse;
 import org.lwjgl.opengl.GL11;
 import xenon.dev.modules.Module;
 import xenon.dev.modules.Settings;
+import xenon.dev.modules.mods.combat.Equipo;
 import xenon.dev.modules.mods.combat.LeftClicker;
+import xenon.dev.modules.mods.combat.PatchClickerV2;
 import xenon.dev.modules.mods.combat.ThrowPot;
+import javax.sound.sampled.AudioInputStream;
+import javax.sound.sampled.AudioSystem;
+import javax.sound.sampled.Clip;
+import javax.sound.sampled.FloatControl;
 
 public final class ClickGuiObj extends GuiScreen {
+    private static Clip menuClip;
     private static final int HEADER_HEIGHT = 24;
     private static final int ROW_HEIGHT = 28;
     private static final int MODULE_ROW_HEIGHT = 24;
@@ -38,16 +49,24 @@ public final class ClickGuiObj extends GuiScreen {
     private boolean dragging;
     private boolean resizing;
     private boolean awaitingKeybind;
+    private boolean teamInputFocused;
+    private String teamInput = "";
+    private String teamMessage = "";
     private Settings draggedSlider;
 
     public ClickGuiObj() {
         if (XenonLite.instance != null) {
             this.modules.add(XenonLite.instance.getAimAssist());
+            this.modules.add(XenonLite.instance.getEquipo());
             this.modules.add(XenonLite.instance.getLeftClicker());
+            this.modules.add(XenonLite.instance.getLeftClickerV2());
             this.modules.add(XenonLite.instance.getRightClicker());
             this.modules.add(XenonLite.instance.getRefill());
             this.modules.add(XenonLite.instance.getThrowPot());
             this.modules.add(XenonLite.instance.getReach());
+            this.modules.add(XenonLite.instance.getPatchClicker());
+            this.modules.add(XenonLite.instance.getPatchClickerV2());
+            this.modules.add(XenonLite.instance.getPatchCrumbs());
             this.modules.add(XenonLite.instance.getVelocity());
         }
         if (!this.modules.isEmpty()) {
@@ -57,6 +76,8 @@ public final class ClickGuiObj extends GuiScreen {
 
     @Override
     public void initGui() {
+        Keyboard.enableRepeatEvents(true);
+        playEntranceMusic();
         int margin = responsiveMargin();
         int minimumWidth = minimumPanelWidth();
         int minimumHeight = minimumPanelHeight();
@@ -169,20 +190,57 @@ public final class ClickGuiObj extends GuiScreen {
         drawToggle(x, y, action ? "Throw potion" : "Enabled", !action && this.selectedModule.isEnabled());
         y += ROW_HEIGHT;
 
-        if (action) {
+        if (supportsKeybind(this.selectedModule)) {
             drawKeybind(x, y);
             y += ROW_HEIGHT;
         }
         for (Settings setting : this.selectedModule.getSettings()) {
             if (setting.isBooleanSetting()) {
                 drawToggle(x, y, setting.getName(), setting.getValBoolean());
+            } else if (setting.isModeSetting()) {
+                drawMode(x, y, setting);
             } else {
                 drawSlider(x, y, setting);
             }
             y += ROW_HEIGHT;
         }
+        if (this.selectedModule instanceof Equipo) {
+            drawTeamEditor((Equipo) this.selectedModule, x, y);
+        }
         endClip();
         drawScrollbar(right() - 4, top, bottom - top, settingsContentHeight(), this.settingsScroll);
+    }
+
+    private void drawTeamEditor(Equipo equipo, int x, int y) {
+        int buttonWidth = Math.min(58, Math.max(42, contentWidth() / 4));
+        int inputWidth = Math.max(30, contentWidth() - buttonWidth - 6);
+        drawRect(x, y - 2, x + inputWidth, y + 16,
+                this.teamInputFocused ? new Color(58, 45, 68).getRGB() : new Color(48, 52, 58).getRGB());
+        String shown = this.teamInput.isEmpty() && !this.teamInputFocused ? "IGN del jugador" : this.teamInput;
+        int inputColor = this.teamInput.isEmpty() && !this.teamInputFocused
+                ? new Color(135, 139, 146).getRGB() : Color.WHITE.getRGB();
+        this.fontRendererObj.drawString(trimToWidth(shown, inputWidth - 10), x + 5, y + 3, inputColor);
+        if (this.teamInputFocused && (System.currentTimeMillis() / 500L) % 2L == 0L) {
+            int cursor = x + 5 + this.fontRendererObj.getStringWidth(trimToWidth(this.teamInput, inputWidth - 12));
+            drawRect(cursor, y + 2, cursor + 1, y + 13, Color.WHITE.getRGB());
+        }
+        int buttonX = x + inputWidth + 6;
+        drawRect(buttonX, y - 2, buttonX + buttonWidth, y + 16, ACCENT);
+        this.fontRendererObj.drawString("Añadir", buttonX + 6, y + 3, Color.WHITE.getRGB());
+        y += ROW_HEIGHT;
+        if (!this.teamMessage.isEmpty()) {
+            this.fontRendererObj.drawString(trimToWidth(this.teamMessage, contentWidth()), x, y, ACCENT_SECONDARY);
+            y += 18;
+        }
+        for (Map.Entry<UUID, String> entry : equipo.getNombres().entrySet()) {
+            int removeWidth = 54;
+            this.fontRendererObj.drawString(trimToWidth(entry.getValue(), contentWidth() - removeWidth - 8),
+                    x, y + 3, Color.WHITE.getRGB());
+            int removeX = x + contentWidth() - removeWidth;
+            drawRect(removeX, y - 1, removeX + removeWidth, y + 16, new Color(93, 38, 50).getRGB());
+            this.fontRendererObj.drawString("Quitar", removeX + 7, y + 3, Color.WHITE.getRGB());
+            y += ROW_HEIGHT;
+        }
     }
 
     private void drawToggle(int x, int y, String label, boolean checked) {
@@ -220,6 +278,17 @@ public final class ClickGuiObj extends GuiScreen {
         this.fontRendererObj.drawString(value,
                 sliderX + sliderWidth - this.fontRendererObj.getStringWidth(value), y - 7,
                 new Color(190, 194, 201).getRGB());
+    }
+
+    private void drawMode(int x, int y, Settings setting) {
+        int controlX = sliderX();
+        int controlWidth = sliderWidth();
+        this.fontRendererObj.drawString(trimToWidth(setting.getName(), Math.max(20, controlX - x - 8)),
+                x, y + 2, Color.WHITE.getRGB());
+        drawRect(controlX, y - 2, controlX + controlWidth, y + 14, new Color(48, 52, 58).getRGB());
+        this.fontRendererObj.drawString(trimToWidth(setting.getValString(), controlWidth - 18),
+                controlX + 5, y + 2, Color.WHITE.getRGB());
+        this.fontRendererObj.drawString(">", controlX + controlWidth - 10, y + 2, ACCENT);
     }
 
     @Override
@@ -278,6 +347,7 @@ public final class ClickGuiObj extends GuiScreen {
                 this.selectedModule = module;
                 this.settingsScroll = 0;
                 this.awaitingKeybind = false;
+                this.teamInputFocused = false;
                 this.draggedSlider = null;
                 clampScrolls();
                 return true;
@@ -305,7 +375,11 @@ public final class ClickGuiObj extends GuiScreen {
             return;
         }
         y += ROW_HEIGHT;
-        if (this.selectedModule instanceof ThrowPot) {
+        if (this.selectedModule instanceof Equipo) {
+            clickTeamEditor((Equipo) this.selectedModule, mouseX, mouseY, x, y);
+            return;
+        }
+        if (supportsKeybind(this.selectedModule)) {
             if (inside(mouseX, mouseY, sliderX(), y - 3, sliderWidth(), 18)) {
                 this.awaitingKeybind = true;
                 return;
@@ -317,7 +391,12 @@ public final class ClickGuiObj extends GuiScreen {
                 setting.setValBoolean(!setting.getValBoolean());
                 return;
             }
-            if (!setting.isBooleanSetting()
+            if (setting.isModeSetting()
+                    && inside(mouseX, mouseY, sliderX(), y - 3, sliderWidth(), 18)) {
+                setting.nextMode();
+                return;
+            }
+            if (setting.isNumberSetting()
                     && inside(mouseX, mouseY, sliderX(), y, sliderWidth(), 15)) {
                 this.draggedSlider = setting;
                 updateSlider(setting, mouseX);
@@ -325,6 +404,44 @@ public final class ClickGuiObj extends GuiScreen {
             }
             y += ROW_HEIGHT;
         }
+    }
+
+    private void clickTeamEditor(Equipo equipo, int mouseX, int mouseY, int x, int y) {
+        int buttonWidth = Math.min(58, Math.max(42, contentWidth() / 4));
+        int inputWidth = Math.max(30, contentWidth() - buttonWidth - 6);
+        this.teamInputFocused = inside(mouseX, mouseY, x, y - 2, inputWidth, 18);
+        if (inside(mouseX, mouseY, x + inputWidth + 6, y - 2, buttonWidth, 18)) {
+            addTeamPlayer(equipo);
+            return;
+        }
+        y += ROW_HEIGHT;
+        if (!this.teamMessage.isEmpty()) {
+            y += 18;
+        }
+        for (Map.Entry<UUID, String> entry : equipo.getNombres().entrySet()) {
+            int removeWidth = 54;
+            int removeX = x + contentWidth() - removeWidth;
+            if (inside(mouseX, mouseY, removeX, y - 1, removeWidth, 17)) {
+                equipo.eliminar(entry.getKey());
+                this.teamMessage = "Jugador removido";
+                clampScrolls();
+                return;
+            }
+            y += ROW_HEIGHT;
+        }
+    }
+
+    private void addTeamPlayer(Equipo equipo) {
+        String ign = this.teamInput.trim();
+        if (ign.isEmpty()) {
+            this.teamMessage = "Escribe un IGN";
+        } else if (equipo.agregar(ign)) {
+            this.teamInput = "";
+            this.teamMessage = "Jugador añadido";
+        } else {
+            this.teamMessage = "IGN no encontrado en Tab o ya añadido";
+        }
+        clampScrolls();
     }
 
     private void updateSlider(Settings setting, int mouseX) {
@@ -346,7 +463,21 @@ public final class ClickGuiObj extends GuiScreen {
 
     @Override
     protected void keyTyped(char typedChar, int keyCode) throws IOException {
-        if (this.awaitingKeybind && this.selectedModule instanceof ThrowPot) {
+        if (this.teamInputFocused && this.selectedModule instanceof Equipo) {
+            if (keyCode == Keyboard.KEY_ESCAPE) {
+                this.teamInputFocused = false;
+            } else if (keyCode == Keyboard.KEY_RETURN || keyCode == Keyboard.KEY_NUMPADENTER) {
+                addTeamPlayer((Equipo) this.selectedModule);
+            } else if (keyCode == Keyboard.KEY_BACK) {
+                if (!this.teamInput.isEmpty()) {
+                    this.teamInput = this.teamInput.substring(0, this.teamInput.length() - 1);
+                }
+            } else if (isAllowedIgnCharacter(typedChar) && this.teamInput.length() < 16) {
+                this.teamInput += typedChar;
+            }
+            return;
+        }
+        if (this.awaitingKeybind && supportsKeybind(this.selectedModule)) {
             if (keyCode == Keyboard.KEY_ESCAPE) {
                 this.awaitingKeybind = false;
                 return;
@@ -359,12 +490,68 @@ public final class ClickGuiObj extends GuiScreen {
             this.awaitingKeybind = false;
             return;
         }
+        if (keyCode == Keyboard.KEY_ESCAPE) {
+            stopEntranceMusic();
+        }
         super.keyTyped(typedChar, keyCode);
+    }
+
+    private static boolean isAllowedIgnCharacter(char character) {
+        return character == '_' || character >= '0' && character <= '9'
+                || character >= 'A' && character <= 'Z'
+                || character >= 'a' && character <= 'z';
+    }
+
+    @Override
+    public void onGuiClosed() {
+        Keyboard.enableRepeatEvents(false);
+        stopEntranceMusic();
+        super.onGuiClosed();
+    }
+
+    private static synchronized void playEntranceMusic() {
+        if (menuClip != null && menuClip.isRunning()) {
+            return;
+        }
+        stopEntranceMusic();
+        try {
+            InputStream source = ClickGuiObj.class.getResourceAsStream("/assets/xenonlite/menu_music.wav");
+            if (source == null) {
+                return;
+            }
+            try (BufferedInputStream buffered = new BufferedInputStream(source);
+                 AudioInputStream audioStream = AudioSystem.getAudioInputStream(buffered)) {
+                Clip clip = AudioSystem.getClip();
+                clip.open(audioStream);
+                if (clip.isControlSupported(FloatControl.Type.MASTER_GAIN)) {
+                    FloatControl gain = (FloatControl) clip.getControl(FloatControl.Type.MASTER_GAIN);
+                    gain.setValue(Math.max(gain.getMinimum(), Math.min(gain.getMaximum(), -12.0F)));
+                }
+                menuClip = clip;
+                menuClip.start();
+            }
+        } catch (Exception exception) {
+            exception.printStackTrace();
+            stopEntranceMusic();
+        }
+    }
+
+    private static synchronized void stopEntranceMusic() {
+        if (menuClip != null) {
+            menuClip.stop();
+            menuClip.flush();
+            menuClip.close();
+            menuClip = null;
+        }
     }
 
     @Override
     public boolean doesGuiPauseGame() {
         return true;
+    }
+
+    private static boolean supportsKeybind(Module module) {
+        return module instanceof ThrowPot || module instanceof PatchClickerV2;
     }
 
     private void drawResizeHandle() {
@@ -409,10 +596,18 @@ public final class ClickGuiObj extends GuiScreen {
             return 0;
         }
         int rows = 1 + this.selectedModule.getSettings().size();
-        if (this.selectedModule instanceof ThrowPot) {
+        if (supportsKeybind(this.selectedModule)) {
             rows++;
         }
-        return rows * ROW_HEIGHT + 10;
+        int height = rows * ROW_HEIGHT + 10;
+        if (this.selectedModule instanceof Equipo) {
+            Equipo equipo = (Equipo) this.selectedModule;
+            height += ROW_HEIGHT + equipo.getNombres().size() * ROW_HEIGHT;
+            if (!this.teamMessage.isEmpty()) {
+                height += 18;
+            }
+        }
+        return height;
     }
 
     private void keepPanelOnScreen() {
